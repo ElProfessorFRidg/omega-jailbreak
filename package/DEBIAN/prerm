@@ -1,0 +1,19 @@
+#!/bin/sh
+# Stop the daemons and unlock the files so iOS can manage them again.
+set -u
+
+PREFIX=""
+[ -d /var/jb ] && PREFIX=/var/jb
+
+LAUNCHCTL=launchctl
+[ -x /var/jb/usr/bin/launchctl ] && LAUNCHCTL=/var/jb/usr/bin/launchctl
+for p in "$PREFIX/Library/LaunchDaemons/party.jailbreak.omega.webui.plist" \
+         "$PREFIX/Library/LaunchDaemons/party.jailbreak.omega.ondevice.plist"; do
+    $LAUNCHCTL bootout system "$p" 2>/dev/null \
+        || $LAUNCHCTL unload -w "$p" 2>/dev/null || true
+done
+
+/usr/bin/chflags -R noschg,nouchg /private/var/db/MobileIdentityData 2>/dev/null || true
+/usr/bin/chflags -R noschg,nouchg /private/var/protected/trustd/private/ocspcache.sqlite3 2>/dev/null || true
+
+exit 0

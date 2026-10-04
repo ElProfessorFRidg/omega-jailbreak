@@ -1,0 +1,23 @@
+#!/bin/sh
+set -e
+
+PREFIX=""
+[ -d /var/jb ] && PREFIX=/var/jb
+
+chmod 755 "$PREFIX/usr/local/bin/omega-ondevice" 2>/dev/null || true
+chmod 755 "$PREFIX/usr/local/libexec/omega-webui.py" 2>/dev/null || true
+chown -R root:wheel "$PREFIX/usr/local/bin/omega-ondevice" \
+    "$PREFIX/usr/local/libexec/omega-webui.py" \
+    "$PREFIX/Library/LaunchDaemons/party.jailbreak.omega."* 2>/dev/null || true
+
+LAUNCHCTL=launchctl
+[ -x /var/jb/usr/bin/launchctl ] && LAUNCHCTL=/var/jb/usr/bin/launchctl
+for p in "$PREFIX/Library/LaunchDaemons/party.jailbreak.omega.ondevice.plist" \
+         "$PREFIX/Library/LaunchDaemons/party.jailbreak.omega.webui.plist"; do
+    $LAUNCHCTL bootstrap system "$p" 2>/dev/null \
+        || $LAUNCHCTL load -w "$p" 2>/dev/null || true
+done
+
+echo "Omega installed. Open http://127.0.0.1:8472 in Safari for the control panel."
+echo "Reminder: block ocsp/ppq/crl/valid.apple.com at your DNS for the online side."
+exit 0

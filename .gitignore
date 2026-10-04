@@ -1,0 +1,6 @@
+build/
+*.deb
+site/
+omega_snapshots/
+__pycache__/
+*.pyc

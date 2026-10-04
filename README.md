@@ -1,0 +1,66 @@
+# Omega Toolkit
+
+Keep sideloaded / enterprise-signed apps working on a **jailbroken (rootless)**
+iDevice by neutralising the local certificate-revocation state, with a small
+**on-device web control panel** (buttons for Apply / Status / Log / Debug).
+
+> Your own device, your own apps. Experimental, use at your own risk. This does
+> **not** remove the revocation on Apple's side — it only stops your device from
+> acting on it (locally + at the network).
+
+## How revocation blocking actually works (verified)
+
+Two independent layers — you need **both**:
+
+1. **Local memory** — the device caches "this cert is REVOKED" in
+   `trustd/private/ocspcache.sqlite3` and the four
+   `MobileIdentityData/*.plist` ban-lists. The tweak wipes the cache and
+   rewrites the ban-lists as empty, **immutable (`schg`)** plists. Effect: apps
+   run **offline**. (It does *not* delete `mis.db` — on rootless the profiles
+   live inside it with no `.mobileprovision` backups, so that would wipe them.)
+2. **Live online re-check** — once online, `amfid` re-queries
+   `ocsp.apple.com` / `ppq.apple.com` live and re-blocks. **No on-device file
+   can stop this** (`/etc/hosts` is read-only on rootless), so you must block
+   these at the **network / DNS** level:
+   `ocsp.apple.com ppq.apple.com crl.apple.com valid.apple.com`
+   See [`docs/SELF-HOSTED-DNS.md`](docs/SELF-HOSTED-DNS.md) (self-hosted, like
+   NextDNS) and [`pc-tools/Omega-DoH.mobileconfig`](pc-tools/Omega-DoH.mobileconfig).
+
+## Repo layout
+
+```
+package/      the .deb source (DEBIAN/ + var/jb/…): worker, web UI, LaunchDaemons
+repo-assets/  Sileo repo landing page (served by GitHub Pages)
+pc-tools/     PC-side helpers (USB, no server needed):
+              omega_ssh.py          drive the device over SSH-through-USB (diag/clean/exec)
+              omega_pro.py          inspect profiles + OCSP revocation status (restore is inspection-grade)
+              offline_hotspot.ps1   Windows "dead" Wi-Fi hotspot (no internet) for offline restores
+              Omega-DoH.mobileconfig iOS DoH profile template (point it at your DNS)
+docs/         SELF-HOSTED-DNS.md    set up your own filtering DNS on a VPS
+build.sh      build the .deb (needs dpkg-deb; CI does it for you)
+.github/      CI: builds the .deb and publishes a Sileo repo via GitHub Pages
+```
+
+## Install (on device)
+
+Add the GitHub Pages URL of this repo in **Sileo** → Sources, install
+**Omega On-Device**, then open the control panel in Safari:
+
+```
+http://127.0.0.1:8472
+```
+
+The worker also runs at every boot (semi-tethered: after each re-jailbreak the
+LaunchDaemon re-applies it).
+
+## Build locally
+
+```sh
+./build.sh      # produces build/*.deb  (Linux/macOS with dpkg-deb)
+```
+
+## Credits
+
+On-device method after JJTech's backup trick and the jailbreak.party Omega tool;
+the ban-list/OCSP neutralisation follows the known community snippet, corrected
+(no `mis.db` deletion) and verified over SSH root.

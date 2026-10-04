@@ -1,0 +1,82 @@
+name: build-and-publish
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install packaging tools
+        run: sudo apt-get update && sudo apt-get install -y dpkg-dev bzip2 xz-utils
+
+      - name: Build the .deb
+        run: |
+          chmod +x build.sh
+          ./build.sh
+
+      - name: Assemble the Sileo/APT repo (GitHub Pages)
+        run: |
+          mkdir -p site/debs
+          cp build/*.deb site/debs/
+          cd site
+          # Packages index
+          dpkg-scanpackages -m debs /dev/null > Packages
+          bzip2 -kf Packages
+          xz -kf Packages
+          # Release metadata
+          cat > Release <<EOF
+          Origin: Omega Repo
+          Label: Omega Repo
+          Suite: stable
+          Version: 1.0
+          Codename: ios
+          Architectures: iphoneos-arm64
+          Components: main
+          Description: Omega on-device tweak (keep sideloaded apps valid)
+          EOF
+          cp ../repo-assets/index.html index.html 2>/dev/null || true
+          cp ../repo-assets/sileo-featured.json sileo-featured.json 2>/dev/null || true
+          ls -R .
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: omega-deb
+          path: build/*.deb
+
+      - name: Release on tag-like run
+        if: github.ref == 'refs/heads/main'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: latest
+          name: Omega On-Device (latest)
+          files: build/*.deb
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+  deploy-pages:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
