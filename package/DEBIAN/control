@@ -1,6 +1,6 @@
 Package: party.jailbreak.omega-ondevice
 Name: Omega On-Device
-Version: 1.4.0
+Version: 1.5.0
 Architecture: iphoneos-arm64
 Description: Keeps sideloaded apps valid on-device. Backend worker that
  neutralises the local revocation state (OCSP cache + the four

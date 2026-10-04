@@ -1,30 +1,83 @@
 #!/bin/sh
-set -e
+# ---------------------------------------------------------------------------
+#  postinst - install/upgrade the Omega On-Device worker.
+#
+#  Goal: everything works right after install, with NO respring/reboot.
+#   * reload the daemons cleanly even on upgrade (bootout -> bootstrap),
+#   * kick the worker once so the revocation state is neutralised now,
+#   * uicache the native app if it is already on disk (reinstalls).
+#
+#  Rootless note: absolute /bin, /usr/bin paths do not exist on a rootless
+#  jailbreak - everything lives under /var/jb. dpkg runs maintainer scripts
+#  with a minimal PATH, so we set a rootless-aware PATH explicitly (the old
+#  postinst relied on bare command names and could fail to find launchctl).
+# ---------------------------------------------------------------------------
+export PATH=/var/jb/usr/bin:/var/jb/bin:/var/jb/usr/sbin:/var/jb/sbin:/usr/bin:/bin:/usr/sbin:/sbin
+set -u
 
 PREFIX=""
-[ -d /var/jb ] && PREFIX=/var/jb
+if [ -d /var/jb ]; then PREFIX=/var/jb; fi
 
-chmod 755 "$PREFIX/usr/local/bin/omega-ondevice" "$PREFIX/usr/local/bin/omega-runner" 2>/dev/null || true
-chown -R root:wheel "$PREFIX/usr/local/bin/omega-ondevice" \
-    "$PREFIX/usr/local/bin/omega-runner" \
-    "$PREFIX/Library/LaunchDaemons/party.jailbreak.omega."* 2>/dev/null || true
+BIN="$PREFIX/usr/local/bin"
+LD="$PREFIX/Library/LaunchDaemons"
+ONDEVICE_PLIST="$LD/party.jailbreak.omega.ondevice.plist"
+TRIGGER_PLIST="$LD/party.jailbreak.omega.trigger.plist"
+ONDEVICE_LABEL=party.jailbreak.omega.ondevice
+TRIGGER_LABEL=party.jailbreak.omega.trigger
+
+chmod 755 "$BIN/omega-ondevice" "$BIN/omega-runner" 2>/dev/null || true
+chown -R root:wheel "$BIN/omega-ondevice" "$BIN/omega-runner" \
+    "$LD/party.jailbreak.omega."* 2>/dev/null || true
 
 # Shared trigger dir: the non-root app writes here, the root trigger daemon
 # watches it. Owned by mobile so the (sandboxed-or-not) app can write.
 mkdir -p /var/mobile/.omega 2>/dev/null || true
-for f in cmd out trigger; do [ -e "/var/mobile/.omega/$f" ] || : > "/var/mobile/.omega/$f"; done
+for f in cmd out trigger; do
+    [ -e "/var/mobile/.omega/$f" ] || : > "/var/mobile/.omega/$f"
+done
 chown -R mobile:mobile /var/mobile/.omega 2>/dev/null || true
 chmod 777 /var/mobile/.omega 2>/dev/null || true
 chmod 666 /var/mobile/.omega/cmd /var/mobile/.omega/out /var/mobile/.omega/trigger 2>/dev/null || true
 
 LAUNCHCTL=launchctl
 [ -x /var/jb/usr/bin/launchctl ] && LAUNCHCTL=/var/jb/usr/bin/launchctl
-for p in "$PREFIX/Library/LaunchDaemons/party.jailbreak.omega.ondevice.plist" \
-         "$PREFIX/Library/LaunchDaemons/party.jailbreak.omega.trigger.plist"; do
-    $LAUNCHCTL bootstrap system "$p" 2>/dev/null \
-        || $LAUNCHCTL load -w "$p" 2>/dev/null || true
-done
 
-echo "Omega On-Device installed. Use the native Omega app, or it applies at boot."
+# Reload a daemon so the plist on disk is the one actually running. On a fresh
+# install bootout is a no-op; on an upgrade it is what frees the old label so
+# bootstrap can load the NEW code without a reboot (the old postinst skipped
+# this, which is why an upgrade used to need a respring to take effect).
+reload_daemon() {
+    plist="$1"; label="$2"
+    $LAUNCHCTL bootout system "$plist" 2>/dev/null \
+        || $LAUNCHCTL bootout "system/$label" 2>/dev/null \
+        || $LAUNCHCTL unload "$plist" 2>/dev/null || true
+    $LAUNCHCTL enable "system/$label" 2>/dev/null || true
+    $LAUNCHCTL bootstrap system "$plist" 2>/dev/null \
+        || $LAUNCHCTL load -w "$plist" 2>/dev/null || true
+}
+
+reload_daemon "$ONDEVICE_PLIST" "$ONDEVICE_LABEL"
+reload_daemon "$TRIGGER_PLIST" "$TRIGGER_LABEL"
+
+# Apply once, right now, so the user does not have to wait for the hourly
+# StartInterval or a reboot. Prefer kickstart (re-runs the loaded daemon);
+# fall back to invoking the worker directly - the postinst already runs as
+# root, which is all 'apply' needs.
+$LAUNCHCTL kickstart -k "system/$ONDEVICE_LABEL" 2>/dev/null \
+    || "$BIN/omega-ondevice" apply >/dev/null 2>&1 \
+    || true
+
+# If the native Omega app is already present (e.g. a reinstall), refresh the
+# icon cache so it shows up without a respring. On first install the app
+# package runs its own uicache after this script.
+APP="$PREFIX/Applications/Omega.app"
+if [ -d "$APP" ]; then
+    UICACHE=uicache
+    [ -x /var/jb/usr/bin/uicache ] && UICACHE=/var/jb/usr/bin/uicache
+    $UICACHE -p "$APP" 2>/dev/null || $UICACHE -a 2>/dev/null || true
+fi
+
+echo "Omega On-Device installed and active (no respring needed)."
+echo "Drive it from the native Omega app, or it re-applies at every boot."
 echo "Reminder: block ocsp/ppq/crl/valid.apple.com at your DNS for the online side."
 exit 0

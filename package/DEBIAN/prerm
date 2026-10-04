@@ -1,10 +1,20 @@
 #!/bin/sh
-# Stop the daemons and unlock the files so iOS can manage them again.
+# prerm - called before the package is removed OR before an upgrade unpacks.
+#   * upgrade: leave everything in place; the new postinst reloads the daemons
+#     cleanly (bootout -> bootstrap) and re-applies. Tearing down here would
+#     briefly unlock the ban-lists for no reason.
+#   * remove/purge: stop the daemons and unlock the files so iOS can manage
+#     them again.
 export PATH=/var/jb/usr/bin:/var/jb/bin:/var/jb/usr/sbin:/var/jb/sbin:/usr/bin:/bin:/usr/sbin:/sbin
 set -u
 
+# $1 is "upgrade" during an upgrade, "remove" on removal. Do nothing on upgrade.
+case "${1:-remove}" in
+    upgrade|failed-upgrade) exit 0 ;;
+esac
+
 PREFIX=""
-[ -d /var/jb ] && PREFIX=/var/jb
+if [ -d /var/jb ]; then PREFIX=/var/jb; fi
 
 LAUNCHCTL=launchctl
 [ -x /var/jb/usr/bin/launchctl ] && LAUNCHCTL=/var/jb/usr/bin/launchctl
@@ -15,7 +25,7 @@ for p in "$PREFIX/Library/LaunchDaemons/party.jailbreak.omega.trigger.plist" \
 done
 
 chflags -R noschg,nouchg /private/var/db/MobileIdentityData 2>/dev/null || true
-chflags -R noschg,nouchg /private/var/protected/trustd/private/ocspcache.sqlite3 2>/dev/null || true
+chflags noschg,nouchg /private/var/protected/trustd/private/ocspcache.sqlite3 2>/dev/null || true
 rm -rf /var/mobile/.omega 2>/dev/null || true
 
 exit 0
