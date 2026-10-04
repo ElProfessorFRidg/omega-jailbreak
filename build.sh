@@ -9,8 +9,7 @@ mkdir -p "$OUT"
 
 # Normalise line endings + exec bits on the scripts that go in the package.
 for f in package/DEBIAN/postinst package/DEBIAN/prerm \
-         package/var/jb/usr/local/bin/omega-ondevice \
-         package/var/jb/usr/local/libexec/omega-webui.py; do
+         package/var/jb/usr/local/bin/omega-ondevice; do
   sed -i 's/\r$//' "$f"
   chmod 755 "$f"
 done
