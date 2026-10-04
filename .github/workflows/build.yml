@@ -15,29 +15,55 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  build:
+  build-tweak:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Install packaging tools
+        run: sudo apt-get update && sudo apt-get install -y dpkg-dev
+      - name: Build the tweak .deb
+        run: chmod +x build.sh && ./build.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tweak-deb
+          path: build/*.deb
 
+  build-app:
+    runs-on: ubuntu-latest
+    continue-on-error: true   # a Theos failure must not block publishing the tweak
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Theos (toolchain + SDKs)
+        uses: Randomblock1/theos-action@v1
+      - name: Build the native app (rootless)
+        env:
+          THEOS_PACKAGE_SCHEME: rootless
+        run: make -C app package FINALPACKAGE=1
+      - uses: actions/upload-artifact@v4
+        with:
+          name: app-deb
+          path: app/packages/*.deb
+
+  publish:
+    needs: [build-tweak, build-app]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
       - name: Install packaging tools
         run: sudo apt-get update && sudo apt-get install -y dpkg-dev bzip2 xz-utils
-
-      - name: Build the .deb
-        run: |
-          chmod +x build.sh
-          ./build.sh
-
-      - name: Assemble the Sileo/APT repo (GitHub Pages)
+      - name: Collect built .debs
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      - name: Assemble the Sileo/APT repo
         run: |
           mkdir -p site/debs
-          cp build/*.deb site/debs/
+          find artifacts -name '*.deb' -exec cp {} site/debs/ \;
+          echo "Packaged debs:"; ls -la site/debs
           cd site
-          # Packages index
           dpkg-scanpackages -m debs /dev/null > Packages
           bzip2 -kf Packages
           xz -kf Packages
-          # Release metadata
           cat > Release <<EOF
           Origin: Omega Repo
           Label: Omega Repo
@@ -46,33 +72,25 @@ jobs:
           Codename: ios
           Architectures: iphoneos-arm64
           Components: main
-          Description: Omega on-device tweak (keep sideloaded apps valid)
+          Description: Omega on-device tweak + native app (keep sideloaded apps valid)
           EOF
           cp ../repo-assets/index.html index.html 2>/dev/null || true
-          cp ../repo-assets/sileo-featured.json sileo-featured.json 2>/dev/null || true
+          cp ../repo-assets/icon.png CydiaIcon.png 2>/dev/null || true
           ls -R .
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: omega-deb
-          path: build/*.deb
-
-      - name: Release on tag-like run
-        if: github.ref == 'refs/heads/main'
+      - name: Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: latest
-          name: Omega On-Device (latest)
-          files: build/*.deb
+          name: Omega (latest)
+          files: site/debs/*.deb
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
       - uses: actions/upload-pages-artifact@v3
         with:
           path: site
 
   deploy-pages:
-    needs: build
+    needs: publish
     runs-on: ubuntu-latest
     environment:
       name: github-pages

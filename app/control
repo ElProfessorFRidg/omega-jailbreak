@@ -1,0 +1,9 @@
+Package: party.jailbreak.omega-app
+Name: Omega
+Version: 1.0.0
+Architecture: iphoneos-arm64
+Description: Native WKWebView front-end for the Omega control panel (Apply / Status / Log / Debug). Talks to the omega-ondevice daemon on 127.0.0.1:8472.
+Author: Omega
+Maintainer: Omega
+Section: Applications
+Depends: party.jailbreak.omega-ondevice
