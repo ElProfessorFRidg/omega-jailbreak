@@ -27,6 +27,15 @@ EMPTY_PLIST='<?xml version="1.0" encoding="UTF-8"?>
 
 log() { logger -t omega-ondevice "$*" 2>/dev/null; echo "[$(date '+%H:%M:%S')] $*"; }
 
+# Keep the log from growing without bound (it is also the daemon's stdout).
+# Truncate to the last 200 lines once it passes ~256 KB.
+rotate_log() {
+    [ -f "$LOG" ] || return 0
+    sz=$(wc -c <"$LOG" 2>/dev/null || echo 0)
+    [ "${sz:-0}" -gt 262144 ] 2>/dev/null || return 0
+    tail -n 200 "$LOG" > "$LOG.tmp" 2>/dev/null && mv -f "$LOG.tmp" "$LOG" 2>/dev/null
+}
+
 apply() {
     if [ "$(id -u)" != "0" ]; then
         echo "ERROR: not running as root (uid=$(id -u)). The protected files can"
@@ -34,7 +43,10 @@ apply() {
         echo "that runs as root."
         return 1
     fi
+    rotate_log
     log "=== apply start ==="
+    # Make sure the protected dirs exist before we touch them.
+    mkdir -p "$OCSPDIR" "$MID" 2>/dev/null
     chflags -R noschg,nouchg "$OCSPDIR" "$MID" 2>/dev/null
 
     rm -f "$OCSPDIR"/ocspcache.sqlite3 "$OCSPDIR"/ocspcache.sqlite3-shm \
@@ -63,7 +75,24 @@ apply() {
     for d in trustd installd misagentd amfid; do
         killall -9 "$d" 2>/dev/null && log "restarted $d"
     done
+
+    # Verify the locks actually stuck (schg can silently fail on some setups).
+    fails=0
+    for f in $BANLISTS; do
+        if echo x 2>/dev/null >>"$MID/$f.plist"; then
+            log "WARN: $f.plist is still writable (schg lost)"; fails=$((fails+1))
+        fi
+    done
+    if echo x 2>/dev/null >>"$OCSPDIR/ocspcache.sqlite3"; then
+        log "WARN: ocspcache.sqlite3 is still writable (schg lost)"; fails=$((fails+1))
+    fi
+    if [ "$fails" = 0 ]; then
+        log "verify OK: all targets empty + immutable"
+    else
+        log "verify: $fails target(s) NOT locked - check device/iOS support for schg"
+    fi
     log "=== apply done (uid=$(id -u)) ==="
+    return 0
 }
 
 state_of() {
