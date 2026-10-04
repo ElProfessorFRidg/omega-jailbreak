@@ -21,6 +21,11 @@ jobs:
       - uses: actions/checkout@v4
       - name: Install packaging tools
         run: sudo apt-get update && sudo apt-get install -y dpkg-dev
+      - name: Auto-version
+        run: |
+          base=$(awk -F': ' '/^Version:/{print $2}' package/DEBIAN/control | cut -d- -f1)
+          sed -i "s/^Version: .*/Version: ${base}-${{ github.run_number }}/" package/DEBIAN/control
+          echo "tweak version -> ${base}-${{ github.run_number }}"
       - name: Build the tweak .deb
         run: chmod +x build.sh && ./build.sh
       - uses: actions/upload-artifact@v4
@@ -33,6 +38,11 @@ jobs:
     continue-on-error: true   # a Theos failure must not block publishing the tweak
     steps:
       - uses: actions/checkout@v4
+      - name: Auto-version
+        run: |
+          base=$(awk -F': ' '/^Version:/{print $2}' app/control | cut -d- -f1)
+          sed -i "s/^Version: .*/Version: ${base}-${{ github.run_number }}/" app/control
+          echo "app version -> ${base}-${{ github.run_number }}"
       - name: Set up Theos (toolchain + SDKs)
         uses: Randomblock1/theos-action@v1
       - name: Build the native app (rootless)

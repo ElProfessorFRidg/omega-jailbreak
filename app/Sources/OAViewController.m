@@ -6,6 +6,13 @@
 extern char **environ;
 static NSString *const kWorker = @"/var/jb/usr/local/bin/omega-ondevice";
 
+// Resolve the rootless shell (absolute /bin/sh does not exist on rootless).
+static NSString *shellPath(void) {
+    const char *cands[] = {"/var/jb/usr/bin/sh", "/var/jb/bin/sh", "/bin/sh", "/usr/bin/sh", NULL};
+    for (int i = 0; cands[i]; i++) if (access(cands[i], X_OK) == 0) return @(cands[i]);
+    return @"/var/jb/usr/bin/sh";
+}
+
 @interface OAViewController ()
 @property (nonatomic, strong) UITextView *output;
 @property (nonatomic, strong) UILabel *header;
@@ -130,7 +137,8 @@ static NSString *runProgram(NSString *path, NSArray<NSString *> *args) {
                                                       encoding:NSUTF8StringEncoding error:nil];
             result = log.length ? log : @"(log vide)";
         } else {
-            result = runProgram(kWorker, @[cmd]);
+            // Launch via the shell so the worker's interpreter resolves on rootless.
+            result = runProgram(shellPath(), @[kWorker, cmd]);
         }
         dispatch_async(dispatch_get_main_queue(), ^{
             self.output.text = [NSString stringWithFormat:@"$ omega-ondevice %@\n\n%@", cmd, result];

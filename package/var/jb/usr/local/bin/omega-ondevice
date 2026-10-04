@@ -1,28 +1,23 @@
-#!/bin/sh
+#!/var/jb/usr/bin/sh
 # ---------------------------------------------------------------------------
 #  omega-ondevice  -  keep sideloaded apps valid on a jailbroken (rootless)
 #  device by neutralising the local revocation state. Verified over SSH root.
 #
-#  Subcommands:
-#    apply   (default) wipe OCSP cache + rewrite the 4 ban-lists as empty,
-#            immutable (schg) plists, then restart the daemons.
-#    status  show the current state of every touched path (file? size? locked?)
-#    diag    deeper diagnostics (dirs, flags test, uptime, daemon state)
+#  Subcommands:  apply (default) | status | diag
 #
-#  It deliberately does NOT delete mis.db (profiles live inside it with no
-#  .mobileprovision backups) nor touch the other MobileIdentityData plists.
-#
-#  NOTE: this removes only the LOCAL revocation memory -> apps run OFFLINE.
-#  Online, amfid re-checks ocsp/ppq.apple.com live; block those at the network
-#  (self-hosted DNS / NextDNS) - no on-device file can stop the live check,
-#  and /etc/hosts is read-only on a rootless jailbreak.
+#  Uses a rootless PATH and bare command names (absolute /bin, /usr/bin paths
+#  do not exist on a rootless jailbreak - everything lives under /var/jb).
+#  Does NOT delete mis.db (profiles live inside it with no .mobileprovision
+#  backups). Needs root for the chflags/rm on protected files.
 # ---------------------------------------------------------------------------
+export PATH=/var/jb/usr/bin:/var/jb/bin:/var/jb/usr/sbin:/var/jb/sbin:/usr/bin:/bin:/usr/sbin:/sbin
 set -u
+
 LOG=/var/mobile/omega-ondevice.log
 MID=/private/var/db/MobileIdentityData
 OCSPDIR=/private/var/protected/trustd/private
 BANLISTS="AuthListBannedUpps AuthListBannedCdHashes Rejections Indeterminates"
-VALID=0   # also blank trustd/valid.sqlite3? 1=yes (it backs general trust too)
+VALID=0   # also blank trustd/valid.sqlite3? 1=yes
 
 EMPTY_PLIST='<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -30,56 +25,58 @@ EMPTY_PLIST='<?xml version="1.0" encoding="UTF-8"?>
 <array/>
 </plist>'
 
-log() { /usr/bin/logger -t omega-ondevice "$*" 2>/dev/null; echo "[$(date '+%H:%M:%S')] $*"; }
+log() { logger -t omega-ondevice "$*" 2>/dev/null; echo "[$(date '+%H:%M:%S')] $*"; }
 
 apply() {
+    if [ "$(id -u)" != "0" ]; then
+        echo "ERROR: not running as root (uid=$(id -u)). The protected files can"
+        echo "only be changed as root. Launch from the boot daemon, or an app"
+        echo "that runs as root."
+        return 1
+    fi
     log "=== apply start ==="
-    /usr/bin/chflags -R noschg,nouchg "$OCSPDIR" "$MID" 2>/dev/null
+    chflags -R noschg,nouchg "$OCSPDIR" "$MID" 2>/dev/null
 
-    # 1. wipe the OCSP cache (holds the cached REVOKED verdicts)
-    /bin/rm -f "$OCSPDIR"/ocspcache.sqlite3 "$OCSPDIR"/ocspcache.sqlite3-shm \
-               "$OCSPDIR"/ocspcache.sqlite3-wal "$OCSPDIR"/ocspcache.sqlite3-journal
-    /bin/mkdir -p "$OCSPDIR" 2>/dev/null
+    rm -f "$OCSPDIR"/ocspcache.sqlite3 "$OCSPDIR"/ocspcache.sqlite3-shm \
+          "$OCSPDIR"/ocspcache.sqlite3-wal "$OCSPDIR"/ocspcache.sqlite3-journal
+    mkdir -p "$OCSPDIR" 2>/dev/null
     : > "$OCSPDIR/ocspcache.sqlite3"
-    /usr/bin/chflags schg "$OCSPDIR/ocspcache.sqlite3" 2>/dev/null
+    chflags schg "$OCSPDIR/ocspcache.sqlite3" 2>/dev/null
     log "ocsp cache cleared + locked"
 
     [ "$VALID" = 1 ] && {
-        /bin/rm -f /private/var/protected/trustd/valid.sqlite3 \
-                   /private/var/protected/trustd/valid.sqlite3-shm \
-                   /private/var/protected/trustd/valid.sqlite3-wal
+        rm -f /private/var/protected/trustd/valid.sqlite3 \
+              /private/var/protected/trustd/valid.sqlite3-shm \
+              /private/var/protected/trustd/valid.sqlite3-wal
         log "valid.sqlite3 cleared"
     }
 
-    # 2. rewrite the 4 ban-lists as empty plists + lock them immutable
-    /bin/mkdir -p "$MID" 2>/dev/null
+    mkdir -p "$MID" 2>/dev/null
     for f in $BANLISTS; do
-        /usr/bin/chflags -R noschg,nouchg "$MID/$f.plist" 2>/dev/null
-        /bin/rm -rf "$MID/$f.plist"                      # may be a broken directory
+        chflags -R noschg,nouchg "$MID/$f.plist" 2>/dev/null
+        rm -rf "$MID/$f.plist"
         printf '%s\n' "$EMPTY_PLIST" > "$MID/$f.plist"
-        /usr/bin/chflags schg "$MID/$f.plist" 2>/dev/null
+        chflags schg "$MID/$f.plist" 2>/dev/null
         log "locked empty $f.plist"
     done
 
-    # 3. restart the daemons
     for d in trustd installd misagentd amfid; do
-        /usr/bin/killall -9 "$d" 2>/dev/null && log "restarted $d"
+        killall -9 "$d" 2>/dev/null && log "restarted $d"
     done
-    log "=== apply done ==="
+    log "=== apply done (uid=$(id -u)) ==="
 }
 
 state_of() {
     p="$1"
     if [ -d "$p" ]; then echo "DIR (broken!)"
     elif [ -f "$p" ]; then
-        locked=no
-        ( /usr/bin/chflags nouchg "$p" 2>/dev/null ) # probe without persisting
-        if echo "" 2>/dev/null >>"$p"; then :; else locked=schg; fi
-        echo "file $(/usr/bin/wc -c <"$p" 2>/dev/null)o  immutable=$locked"
+        if echo "" 2>/dev/null >>"$p"; then echo "file $(wc -c <"$p" 2>/dev/null)o  immutable=no"
+        else echo "file $(wc -c <"$p" 2>/dev/null)o  immutable=schg"; fi
     else echo "MISSING"; fi
 }
 
 status() {
+    echo "uid=$(id -u)"
     echo "== ban-lists =="
     for f in $BANLISTS; do printf "%-26s " "$f.plist"; state_of "$MID/$f.plist"; done
     echo; echo "== ocsp cache =="
@@ -87,18 +84,17 @@ status() {
 }
 
 diag() {
-    echo "== id =="; /usr/bin/id
-    echo; echo "== uptime =="; /usr/bin/uptime
-    echo; echo "== MobileIdentityData =="; /bin/ls -la "$MID" 2>&1
-    echo; echo "== trustd/private =="; /bin/ls -la "$OCSPDIR" 2>&1
+    echo "== id =="; id
+    echo; echo "== uptime =="; uptime 2>/dev/null
+    echo; echo "== MobileIdentityData =="; ls -la "$MID" 2>&1
+    echo; echo "== trustd/private =="; ls -la "$OCSPDIR" 2>&1
     echo; echo "== immutability test on Rejections.plist =="
-    if echo x 2>/dev/null >>"$MID/Rejections.plist"; then echo "WRITABLE (schg lost!)"; else echo "blocked = schg OK"; fi
-    echo; echo "== daemons =="; /usr/bin/pgrep -l 'trustd|installd|misagentd|amfid' 2>/dev/null || echo "(pgrep n/a)"
-    echo; echo "== recent log =="; /usr/bin/tail -n 15 "$LOG" 2>/dev/null
+    if echo x 2>/dev/null >>"$MID/Rejections.plist"; then echo "WRITABLE (schg lost or not root)"; else echo "blocked = schg OK"; fi
+    echo; echo "== recent log =="; tail -n 15 "$LOG" 2>/dev/null
 }
 
 case "${1:-apply}" in
-    apply)  apply  | /usr/bin/tee -a "$LOG" ;;
+    apply)  apply  | tee -a "$LOG" ;;
     status) status ;;
     diag)   diag   ;;
     *) echo "usage: omega-ondevice [apply|status|diag]" >&2; exit 2 ;;

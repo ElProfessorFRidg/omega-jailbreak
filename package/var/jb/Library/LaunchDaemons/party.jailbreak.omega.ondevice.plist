@@ -4,10 +4,9 @@
 <dict>
     <key>Label</key>
     <string>party.jailbreak.omega.ondevice</string>
-    <key>Program</key>
-    <string>/var/jb/usr/local/bin/omega-ondevice</string>
     <key>ProgramArguments</key>
     <array>
+        <string>/var/jb/usr/bin/sh</string>
         <string>/var/jb/usr/local/bin/omega-ondevice</string>
         <string>apply</string>
     </array>
