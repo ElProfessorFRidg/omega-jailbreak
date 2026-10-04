@@ -12,4 +12,3 @@ Maintainer: Omega
 Section: Tweaks
 Depends: firmware (>= 15.0), python3
 Tag: role::hacker
-Depiction:
