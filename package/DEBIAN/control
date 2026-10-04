@@ -1,14 +1,15 @@
 Package: party.jailbreak.omega-ondevice
 Name: Omega On-Device
-Version: 1.3.0
+Version: 1.4.0
 Architecture: iphoneos-arm64
-Description: Keeps sideloaded apps valid on-device. Neutralises the local
- revocation state (OCSP cache + the four MobileIdentityData ban-lists, rewritten
- empty and locked immutable) and ships a localhost web control panel with
- buttons for Apply / Status / Log / Debug. Pair with a DNS block of
- ocsp/ppq/crl/valid.apple.com for the online side. Re-applies at every boot.
+Description: Keeps sideloaded apps valid on-device. Backend worker that
+ neutralises the local revocation state (OCSP cache + the four
+ MobileIdentityData ban-lists, rewritten empty and locked immutable) and
+ re-applies it at every boot. Drive it from the native Omega app, or it runs
+ automatically on boot. Pair with a DNS block of ocsp/ppq/crl/valid.apple.com
+ for the online side.
 Author: jailbreak.party (on-device port)
 Maintainer: Omega
 Section: Tweaks
-Depends: firmware (>= 15.0), python3
+Depends: firmware (>= 15.0)
 Tag: role::hacker
