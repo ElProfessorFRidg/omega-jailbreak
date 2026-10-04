@@ -1,0 +1,16 @@
+#!/var/jb/usr/bin/sh
+# Root runner fired by launchd (WatchPaths on /var/mobile/.omega/trigger).
+# Reads the requested subcommand, runs the worker AS ROOT, writes the output
+# where the (non-root) app can read it. This is how the native app performs
+# privileged actions without itself being root.
+export PATH=/var/jb/usr/bin:/var/jb/bin:/var/jb/usr/sbin:/var/jb/sbin:/usr/bin:/bin:/usr/sbin:/sbin
+D=/var/mobile/.omega
+cmd=$(cat "$D/cmd" 2>/dev/null)
+case "$cmd" in
+    apply|status|diag) ;;
+    *) cmd=status ;;
+esac
+out=$(/var/jb/usr/local/bin/omega-ondevice "$cmd" 2>&1)
+printf '%s\n' "$out" > "$D/out.tmp" 2>/dev/null
+mv -f "$D/out.tmp" "$D/out" 2>/dev/null
+chmod 666 "$D/out" 2>/dev/null

@@ -1,17 +1,9 @@
 #import "OAViewController.h"
-#import <spawn.h>
-#import <sys/wait.h>
 #import <objc/runtime.h>
 
-extern char **environ;
-static NSString *const kWorker = @"/var/jb/usr/local/bin/omega-ondevice";
-
-// Resolve the rootless shell (absolute /bin/sh does not exist on rootless).
-static NSString *shellPath(void) {
-    const char *cands[] = {"/var/jb/usr/bin/sh", "/var/jb/bin/sh", "/bin/sh", "/usr/bin/sh", NULL};
-    for (int i = 0; cands[i]; i++) if (access(cands[i], X_OK) == 0) return @(cands[i]);
-    return @"/var/jb/usr/bin/sh";
-}
+// Shared trigger dir watched by the root daemon (party.jailbreak.omega.trigger).
+static NSString *const kDir = @"/var/mobile/.omega";
+static NSString *const kLog = @"/var/mobile/omega-ondevice.log";
 
 @interface OAViewController ()
 @property (nonatomic, strong) UITextView *output;
@@ -20,51 +12,43 @@ static NSString *shellPath(void) {
 
 @implementation OAViewController
 
-// Run a program with args, capture stdout+stderr, return combined output.
-static NSString *runProgram(NSString *path, NSArray<NSString *> *args) {
-    int outPipe[2];
-    if (pipe(outPipe) != 0) return @"pipe() failed";
+// Ask the root daemon to run a subcommand and return its output.
+static NSString *runViaRoot(NSString *cmd) {
+    NSFileManager *fm = NSFileManager.defaultManager;
+    [fm createDirectoryAtPath:kDir withIntermediateDirectories:YES attributes:nil error:nil];
+    NSString *cmdF = [kDir stringByAppendingPathComponent:@"cmd"];
+    NSString *outF = [kDir stringByAppendingPathComponent:@"out"];
+    NSString *trgF = [kDir stringByAppendingPathComponent:@"trigger"];
 
-    posix_spawn_file_actions_t fa;
-    posix_spawn_file_actions_init(&fa);
-    posix_spawn_file_actions_adddup2(&fa, outPipe[1], STDOUT_FILENO);
-    posix_spawn_file_actions_adddup2(&fa, outPipe[1], STDERR_FILENO);
-    posix_spawn_file_actions_addclose(&fa, outPipe[0]);
-    posix_spawn_file_actions_addclose(&fa, outPipe[1]);
+    NSError *e = nil;
+    if (![cmd writeToFile:cmdF atomically:YES encoding:NSUTF8StringEncoding error:&e]) {
+        return [NSString stringWithFormat:
+            @"Impossible d'écrire %@\n%@\n\nL'app n'a pas accès à /var/mobile (sandbox ?).",
+            cmdF, e.localizedDescription];
+    }
+    NSDate *prev = [[fm attributesOfItemAtPath:outF error:nil] fileModificationDate];
 
-    NSMutableArray *all = [NSMutableArray arrayWithObject:path];
-    [all addObjectsFromArray:args];
-    char **argv = calloc(all.count + 1, sizeof(char *));
-    for (NSUInteger i = 0; i < all.count; i++) argv[i] = strdup([all[i] UTF8String]);
-    argv[all.count] = NULL;
-
-    pid_t pid = 0;
-    int rc = posix_spawn(&pid, [path UTF8String], &fa, NULL, argv, environ);
-    close(outPipe[1]);
-    for (NSUInteger i = 0; i < all.count; i++) free(argv[i]);
-    free(argv);
-    posix_spawn_file_actions_destroy(&fa);
-
-    if (rc != 0) {
-        close(outPipe[0]);
-        return [NSString stringWithFormat:@"could not launch %@ (err %d). Is Omega On-Device installed?", path, rc];
+    NSString *nonce = [NSString stringWithFormat:@"%f", NSDate.date.timeIntervalSince1970];
+    if (![nonce writeToFile:trgF atomically:YES encoding:NSUTF8StringEncoding error:&e]) {
+        return [NSString stringWithFormat:@"Impossible de déclencher le démon : %@", e.localizedDescription];
     }
 
-    NSMutableData *buf = [NSMutableData data];
-    char chunk[4096];
-    ssize_t n;
-    while ((n = read(outPipe[0], chunk, sizeof(chunk))) > 0) [buf appendBytes:chunk length:n];
-    close(outPipe[0]);
-    int status = 0; waitpid(pid, &status, 0);
-
-    NSString *s = [[NSString alloc] initWithData:buf encoding:NSUTF8StringEncoding];
-    return s.length ? s : [NSString stringWithFormat:@"(no output, exit %d)", WEXITSTATUS(status)];
+    for (int i = 0; i < 75; i++) {            // up to ~15 s
+        usleep(200000);
+        NSDate *now = [[fm attributesOfItemAtPath:outF error:nil] fileModificationDate];
+        if (now && (!prev || [now compare:prev] == NSOrderedDescending)) {
+            NSString *s = [NSString stringWithContentsOfFile:outF encoding:NSUTF8StringEncoding error:nil];
+            return s.length ? s : @"(réponse vide)";
+        }
+    }
+    return @"Pas de réponse du démon root.\n\nLe paquet 'Omega On-Device' est-il "
+           @"installé et le démon party.jailbreak.omega.trigger chargé ? "
+           @"Fais un respring puis réessaie.";
 }
 
 - (void)viewDidLoad {
     [super viewDidLoad];
-    UIColor *bg = [UIColor colorWithRed:0.043 green:0.051 blue:0.063 alpha:1.0];
-    self.view.backgroundColor = bg;
+    self.view.backgroundColor = [UIColor colorWithRed:0.043 green:0.051 blue:0.063 alpha:1.0];
 
     self.header = [[UILabel alloc] init];
     self.header.translatesAutoresizingMaskIntoConstraints = NO;
@@ -92,7 +76,6 @@ static NSString *runProgram(NSString *path, NSArray<NSString *> *args) {
         b.backgroundColor = colors[i];
         b.layer.cornerRadius = 12;
         [b.heightAnchor constraintEqualToConstant:52].active = YES;
-        b.tag = i;
         objc_setAssociatedObject(b, "cmd", cmds[i], OBJC_ASSOCIATION_RETAIN_NONATOMIC);
         [b addTarget:self action:@selector(tap:) forControlEvents:UIControlEventTouchUpInside];
         [row addArrangedSubview:b];
@@ -108,9 +91,9 @@ static NSString *runProgram(NSString *path, NSArray<NSString *> *args) {
     self.output.layer.cornerRadius = 12;
     self.output.textContainerInset = UIEdgeInsetsMake(12, 12, 12, 12);
     self.output.text = @"Omega — neutralise la révocation locale.\n\n"
-                        "• Appliquer : vide ocspcache + verrouille les 4 ban-lists (schg)\n"
-                        "• Vérifier / Log / Debug : état réel sur l'appareil\n\n"
-                        "Rappel : en ligne, bloque ocsp/ppq/crl/valid.apple.com au DNS.";
+                        "• Appliquer : vide ocspcache + verrouille les 4 ban-lists (schg), via root.\n"
+                        "• Vérifier / Debug : état réel. Log : journal du worker.\n\n"
+                        "En ligne, bloque ocsp/ppq/crl/valid.apple.com au DNS.";
     [self.view addSubview:self.output];
 
     UILayoutGuide *g = self.view.safeAreaLayoutGuide;
@@ -129,19 +112,17 @@ static NSString *runProgram(NSString *path, NSArray<NSString *> *args) {
 
 - (void)tap:(UIButton *)sender {
     NSString *cmd = objc_getAssociatedObject(sender, "cmd");
-    self.output.text = [NSString stringWithFormat:@"$ omega-ondevice %@\n…", cmd];
+    self.output.text = [NSString stringWithFormat:@"omega-ondevice %@\n…", cmd];
     dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
         NSString *result;
         if ([cmd isEqualToString:@"log"]) {
-            NSString *log = [NSString stringWithContentsOfFile:@"/var/mobile/omega-ondevice.log"
-                                                      encoding:NSUTF8StringEncoding error:nil];
+            NSString *log = [NSString stringWithContentsOfFile:kLog encoding:NSUTF8StringEncoding error:nil];
             result = log.length ? log : @"(log vide)";
         } else {
-            // Launch via the shell so the worker's interpreter resolves on rootless.
-            result = runProgram(shellPath(), @[kWorker, cmd]);
+            result = runViaRoot(cmd);
         }
         dispatch_async(dispatch_get_main_queue(), ^{
-            self.output.text = [NSString stringWithFormat:@"$ omega-ondevice %@\n\n%@", cmd, result];
+            self.output.text = [NSString stringWithFormat:@"omega-ondevice %@\n\n%@", cmd, result];
         });
     });
 }

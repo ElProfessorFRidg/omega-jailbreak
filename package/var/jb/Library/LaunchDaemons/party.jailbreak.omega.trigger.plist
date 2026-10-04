@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>party.jailbreak.omega.trigger</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/var/jb/usr/bin/sh</string>
+        <string>/var/jb/usr/local/bin/omega-runner</string>
+    </array>
+    <key>WatchPaths</key>
+    <array>
+        <string>/var/mobile/.omega/trigger</string>
+    </array>
+    <key>RunAtLoad</key>
+    <false/>
+    <key>ThrottleInterval</key>
+    <integer>1</integer>
+    <key>ProcessType</key>
+    <string>Background</string>
+    <key>StandardOutPath</key>
+    <string>/var/mobile/omega-ondevice.log</string>
+    <key>StandardErrorPath</key>
+    <string>/var/mobile/omega-ondevice.log</string>
+</dict>
+</plist>

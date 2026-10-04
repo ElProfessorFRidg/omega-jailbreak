@@ -1,5 +1,6 @@
 #!/bin/sh
 # Stop the daemons and unlock the files so iOS can manage them again.
+export PATH=/var/jb/usr/bin:/var/jb/bin:/var/jb/usr/sbin:/var/jb/sbin:/usr/bin:/bin:/usr/sbin:/sbin
 set -u
 
 PREFIX=""
@@ -7,19 +8,14 @@ PREFIX=""
 
 LAUNCHCTL=launchctl
 [ -x /var/jb/usr/bin/launchctl ] && LAUNCHCTL=/var/jb/usr/bin/launchctl
-for p in "$PREFIX/Library/LaunchDaemons/party.jailbreak.omega.webui.plist" \
+for p in "$PREFIX/Library/LaunchDaemons/party.jailbreak.omega.trigger.plist" \
          "$PREFIX/Library/LaunchDaemons/party.jailbreak.omega.ondevice.plist"; do
     $LAUNCHCTL bootout system "$p" 2>/dev/null \
         || $LAUNCHCTL unload -w "$p" 2>/dev/null || true
 done
 
-/usr/bin/chflags -R noschg,nouchg /private/var/db/MobileIdentityData 2>/dev/null || true
-/usr/bin/chflags -R noschg,nouchg /private/var/protected/trustd/private/ocspcache.sqlite3 2>/dev/null || true
-
-# Remove the home-screen WebClip and refresh SpringBoard.
-/bin/rm -rf "$PREFIX/Library/WebClips/Omega.webclip" 2>/dev/null || true
-UICACHE=uicache
-[ -x /var/jb/usr/bin/uicache ] && UICACHE=/var/jb/usr/bin/uicache
-$UICACHE -a 2>/dev/null || true
+chflags -R noschg,nouchg /private/var/db/MobileIdentityData 2>/dev/null || true
+chflags -R noschg,nouchg /private/var/protected/trustd/private/ocspcache.sqlite3 2>/dev/null || true
+rm -rf /var/mobile/.omega 2>/dev/null || true
 
 exit 0
