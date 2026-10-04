@@ -18,6 +18,14 @@ for p in "$PREFIX/Library/LaunchDaemons/party.jailbreak.omega.ondevice.plist" \
         || $LAUNCHCTL load -w "$p" 2>/dev/null || true
 done
 
-echo "Omega installed. Open http://127.0.0.1:8472 in Safari for the control panel."
+# Register the WebClip so an "Omega" icon appears on the home screen.
+UICACHE=uicache
+[ -x /var/jb/usr/bin/uicache ] && UICACHE=/var/jb/usr/bin/uicache
+$UICACHE -p "$PREFIX/Library/WebClips/Omega.webclip" 2>/dev/null \
+    || $UICACHE -a 2>/dev/null || true
+
+echo "Omega installed. Tap the 'Omega' icon on your home screen (or open"
+echo "http://127.0.0.1:8472 in Safari) for the control panel. Respring if the"
+echo "icon doesn't appear immediately."
 echo "Reminder: block ocsp/ppq/crl/valid.apple.com at your DNS for the online side."
 exit 0

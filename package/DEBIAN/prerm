@@ -16,4 +16,10 @@ done
 /usr/bin/chflags -R noschg,nouchg /private/var/db/MobileIdentityData 2>/dev/null || true
 /usr/bin/chflags -R noschg,nouchg /private/var/protected/trustd/private/ocspcache.sqlite3 2>/dev/null || true
 
+# Remove the home-screen WebClip and refresh SpringBoard.
+/bin/rm -rf "$PREFIX/Library/WebClips/Omega.webclip" 2>/dev/null || true
+UICACHE=uicache
+[ -x /var/jb/usr/bin/uicache ] && UICACHE=/var/jb/usr/bin/uicache
+$UICACHE -a 2>/dev/null || true
+
 exit 0
