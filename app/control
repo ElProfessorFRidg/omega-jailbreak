@@ -1,9 +1,9 @@
 Package: party.jailbreak.omega-app
 Name: Omega
-Version: 1.1.0
+Version: 1.2.0
 Architecture: iphoneos-arm64
-Description: Native Omega app: runs the on-device revocation cleanup (Apply / Status / Log / Debug) in a native UI. Needs the omega-ondevice worker.
+Description: Native Omega app. Tabbed UI (Dashboard / Modules / DNS / Settings / Log) to drive the on-device revocation cleanup: toggle each technique (OCSP cache, ban-lists, valid.sqlite3, service restart), install a local DNS block (dnsmasq @ 127.0.0.1) + its profile, and read the worker log. Needs the omega-ondevice worker.
 Author: Omega
 Maintainer: Omega
 Section: Applications
-Depends: party.jailbreak.omega-ondevice
+Depends: party.jailbreak.omega-ondevice (>= 1.6.0)

@@ -3,7 +3,15 @@
 #  omega-ondevice  -  keep sideloaded apps valid on a jailbroken (rootless)
 #  device by neutralising the local revocation state. Verified over SSH root.
 #
-#  Subcommands:  apply (default) | status | diag
+#  Subcommands:
+#    apply (default)   run the enabled modules (see config)
+#    status            human-readable state of every target
+#    diag              verbose diagnostics
+#    config-get        print the effective config (one key=value per line)
+#
+#  Which "modules" run is driven by /var/mobile/.omega/config so the native
+#  app can toggle each technique independently. Missing config == the safe
+#  defaults below (same behaviour as before this was configurable).
 #
 #  Uses a rootless PATH and bare command names (absolute /bin, /usr/bin paths
 #  do not exist on a rootless jailbreak - everything lives under /var/jb).
@@ -14,10 +22,16 @@ export PATH=/var/jb/usr/bin:/var/jb/bin:/var/jb/usr/sbin:/var/jb/sbin:/usr/bin:/
 set -u
 
 LOG=/var/mobile/omega-ondevice.log
+CONFIG=/var/mobile/.omega/config
 MID=/private/var/db/MobileIdentityData
 OCSPDIR=/private/var/protected/trustd/private
 BANLISTS="AuthListBannedUpps AuthListBannedCdHashes Rejections Indeterminates"
-VALID=0   # also blank trustd/valid.sqlite3? 1=yes
+
+# --- module defaults (overridden by $CONFIG) -------------------------------
+mod_ocsp=1       # purge + lock the OCSP response cache
+mod_banlists=1   # rewrite the 4 ban-lists empty + lock (schg)
+mod_valid=0      # also blank trustd/valid.sqlite3 (off by default)
+mod_restart=1    # restart trustd/amfid/installd/misagentd after applying
 
 EMPTY_PLIST='<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -36,34 +50,51 @@ rotate_log() {
     tail -n 200 "$LOG" > "$LOG.tmp" 2>/dev/null && mv -f "$LOG.tmp" "$LOG" 2>/dev/null
 }
 
-apply() {
+# Read KEY=VALUE lines from $CONFIG. Only the known keys are honoured, and
+# only a 0/1 or simple token value, so a stray config file cannot inject
+# anything into the shell.
+load_config() {
+    [ -f "$CONFIG" ] || return 0
+    while IFS='=' read -r k v; do
+        case "$k" in ''|\#*) continue ;; esac
+        v=$(printf '%s' "$v" | tr -cd '0-9A-Za-z._-')
+        case "$k" in
+            mod_ocsp)     mod_ocsp=$v ;;
+            mod_banlists) mod_banlists=$v ;;
+            mod_valid)    mod_valid=$v ;;
+            mod_restart)  mod_restart=$v ;;
+        esac
+    done < "$CONFIG"
+}
+
+need_root() {
     if [ "$(id -u)" != "0" ]; then
         echo "ERROR: not running as root (uid=$(id -u)). The protected files can"
-        echo "only be changed as root. Launch from the boot daemon, or an app"
-        echo "that runs as root."
+        echo "only be changed as root. Launch from the boot daemon, or the native"
+        echo "app (which drives the root trigger daemon)."
         return 1
     fi
-    rotate_log
-    log "=== apply start ==="
-    # Make sure the protected dirs exist before we touch them.
-    mkdir -p "$OCSPDIR" "$MID" 2>/dev/null
-    chflags -R noschg,nouchg "$OCSPDIR" "$MID" 2>/dev/null
+    return 0
+}
 
+do_ocsp() {
+    chflags -R noschg,nouchg "$OCSPDIR" 2>/dev/null
     rm -f "$OCSPDIR"/ocspcache.sqlite3 "$OCSPDIR"/ocspcache.sqlite3-shm \
           "$OCSPDIR"/ocspcache.sqlite3-wal "$OCSPDIR"/ocspcache.sqlite3-journal
-    mkdir -p "$OCSPDIR" 2>/dev/null
     : > "$OCSPDIR/ocspcache.sqlite3"
     chflags schg "$OCSPDIR/ocspcache.sqlite3" 2>/dev/null
     log "ocsp cache cleared + locked"
+}
 
-    [ "$VALID" = 1 ] && {
-        rm -f /private/var/protected/trustd/valid.sqlite3 \
-              /private/var/protected/trustd/valid.sqlite3-shm \
-              /private/var/protected/trustd/valid.sqlite3-wal
-        log "valid.sqlite3 cleared"
-    }
+do_valid() {
+    chflags -R noschg,nouchg /private/var/protected/trustd/valid.sqlite3 2>/dev/null
+    rm -f /private/var/protected/trustd/valid.sqlite3 \
+          /private/var/protected/trustd/valid.sqlite3-shm \
+          /private/var/protected/trustd/valid.sqlite3-wal
+    log "valid.sqlite3 cleared"
+}
 
-    mkdir -p "$MID" 2>/dev/null
+do_banlists() {
     for f in $BANLISTS; do
         chflags -R noschg,nouchg "$MID/$f.plist" 2>/dev/null
         rm -rf "$MID/$f.plist"
@@ -71,26 +102,44 @@ apply() {
         chflags schg "$MID/$f.plist" 2>/dev/null
         log "locked empty $f.plist"
     done
+}
 
+do_restart() {
     for d in trustd installd misagentd amfid; do
         killall -9 "$d" 2>/dev/null && log "restarted $d"
     done
+}
 
-    # Verify the locks actually stuck (schg can silently fail on some setups).
+verify() {
     fails=0
-    for f in $BANLISTS; do
-        if echo x 2>/dev/null >>"$MID/$f.plist"; then
-            log "WARN: $f.plist is still writable (schg lost)"; fails=$((fails+1))
-        fi
-    done
-    if echo x 2>/dev/null >>"$OCSPDIR/ocspcache.sqlite3"; then
+    if [ "$mod_banlists" = 1 ]; then
+        for f in $BANLISTS; do
+            if echo x 2>/dev/null >>"$MID/$f.plist"; then
+                log "WARN: $f.plist is still writable (schg lost)"; fails=$((fails+1))
+            fi
+        done
+    fi
+    if [ "$mod_ocsp" = 1 ] && echo x 2>/dev/null >>"$OCSPDIR/ocspcache.sqlite3"; then
         log "WARN: ocspcache.sqlite3 is still writable (schg lost)"; fails=$((fails+1))
     fi
     if [ "$fails" = 0 ]; then
-        log "verify OK: all targets empty + immutable"
+        log "verify OK: enabled targets empty + immutable"
     else
         log "verify: $fails target(s) NOT locked - check device/iOS support for schg"
     fi
+}
+
+apply() {
+    need_root || return 1
+    rotate_log
+    load_config
+    log "=== apply start (ocsp=$mod_ocsp banlists=$mod_banlists valid=$mod_valid restart=$mod_restart) ==="
+    mkdir -p "$OCSPDIR" "$MID" 2>/dev/null
+    [ "$mod_ocsp" = 1 ]     && do_ocsp
+    [ "$mod_valid" = 1 ]    && do_valid
+    [ "$mod_banlists" = 1 ] && do_banlists
+    [ "$mod_restart" = 1 ]  && do_restart
+    verify
     log "=== apply done (uid=$(id -u)) ==="
     return 0
 }
@@ -105,16 +154,21 @@ state_of() {
 }
 
 status() {
+    load_config
     echo "uid=$(id -u)"
+    echo "modules: ocsp=$mod_ocsp banlists=$mod_banlists valid=$mod_valid restart=$mod_restart"
     echo "== ban-lists =="
     for f in $BANLISTS; do printf "%-26s " "$f.plist"; state_of "$MID/$f.plist"; done
     echo; echo "== ocsp cache =="
     printf "%-26s " "ocspcache.sqlite3"; state_of "$OCSPDIR/ocspcache.sqlite3"
+    echo; echo "== valid.sqlite3 =="
+    printf "%-26s " "valid.sqlite3"; state_of "/private/var/protected/trustd/valid.sqlite3"
 }
 
 diag() {
     echo "== id =="; id
     echo; echo "== uptime =="; uptime 2>/dev/null
+    echo; echo "== config =="; config_get
     echo; echo "== MobileIdentityData =="; ls -la "$MID" 2>&1
     echo; echo "== trustd/private =="; ls -la "$OCSPDIR" 2>&1
     echo; echo "== immutability test on Rejections.plist =="
@@ -122,9 +176,18 @@ diag() {
     echo; echo "== recent log =="; tail -n 15 "$LOG" 2>/dev/null
 }
 
+config_get() {
+    load_config
+    echo "mod_ocsp=$mod_ocsp"
+    echo "mod_banlists=$mod_banlists"
+    echo "mod_valid=$mod_valid"
+    echo "mod_restart=$mod_restart"
+}
+
 case "${1:-apply}" in
-    apply)  apply  | tee -a "$LOG" ;;
-    status) status ;;
-    diag)   diag   ;;
-    *) echo "usage: omega-ondevice [apply|status|diag]" >&2; exit 2 ;;
+    apply)      apply  | tee -a "$LOG" ;;
+    status)     status ;;
+    diag)       diag   ;;
+    config-get) config_get ;;
+    *) echo "usage: omega-ondevice [apply|status|diag|config-get]" >&2; exit 2 ;;
 esac
