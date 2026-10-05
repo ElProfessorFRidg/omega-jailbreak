@@ -25,8 +25,8 @@ TRIGGER_PLIST="$LD/party.jailbreak.omega.trigger.plist"
 ONDEVICE_LABEL=party.jailbreak.omega.ondevice
 TRIGGER_LABEL=party.jailbreak.omega.trigger
 
-chmod 755 "$BIN/omega-ondevice" "$BIN/omega-runner" 2>/dev/null || true
-chown -R root:wheel "$BIN/omega-ondevice" "$BIN/omega-runner" \
+chmod 755 "$BIN/omega-ondevice" "$BIN/omega-runner" "$BIN/omega-dns" 2>/dev/null || true
+chown -R root:wheel "$BIN/omega-ondevice" "$BIN/omega-runner" "$BIN/omega-dns" \
     "$LD/party.jailbreak.omega."* 2>/dev/null || true
 
 # Shared trigger dir: the non-root app writes here, the root trigger daemon
@@ -35,9 +35,14 @@ mkdir -p /var/mobile/.omega 2>/dev/null || true
 for f in cmd out trigger; do
     [ -e "/var/mobile/.omega/$f" ] || : > "/var/mobile/.omega/$f"
 done
+# Seed a default module config the first time (the app rewrites it later).
+if [ ! -e /var/mobile/.omega/config ]; then
+    printf 'mod_ocsp=1\nmod_banlists=1\nmod_valid=0\nmod_restart=1\n' \
+        > /var/mobile/.omega/config 2>/dev/null || true
+fi
 chown -R mobile:mobile /var/mobile/.omega 2>/dev/null || true
 chmod 777 /var/mobile/.omega 2>/dev/null || true
-chmod 666 /var/mobile/.omega/cmd /var/mobile/.omega/out /var/mobile/.omega/trigger 2>/dev/null || true
+chmod 666 /var/mobile/.omega/cmd /var/mobile/.omega/out /var/mobile/.omega/trigger /var/mobile/.omega/config 2>/dev/null || true
 
 LAUNCHCTL=launchctl
 [ -x /var/jb/usr/bin/launchctl ] && LAUNCHCTL=/var/jb/usr/bin/launchctl

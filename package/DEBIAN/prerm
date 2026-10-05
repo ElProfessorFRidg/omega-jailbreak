@@ -19,10 +19,15 @@ if [ -d /var/jb ]; then PREFIX=/var/jb; fi
 LAUNCHCTL=launchctl
 [ -x /var/jb/usr/bin/launchctl ] && LAUNCHCTL=/var/jb/usr/bin/launchctl
 for p in "$PREFIX/Library/LaunchDaemons/party.jailbreak.omega.trigger.plist" \
-         "$PREFIX/Library/LaunchDaemons/party.jailbreak.omega.ondevice.plist"; do
+         "$PREFIX/Library/LaunchDaemons/party.jailbreak.omega.ondevice.plist" \
+         "$PREFIX/Library/LaunchDaemons/party.jailbreak.omega.dnsmasq.plist"; do
     $LAUNCHCTL bootout system "$p" 2>/dev/null \
         || $LAUNCHCTL unload -w "$p" 2>/dev/null || true
 done
+# The local-DNS daemon + its config/profile are created at runtime by
+# omega-dns, so clean them here too (the package does not ship them).
+rm -f "$PREFIX/Library/LaunchDaemons/party.jailbreak.omega.dnsmasq.plist" \
+      "$PREFIX/etc/omega-dnsmasq.conf" 2>/dev/null || true
 
 chflags -R noschg,nouchg /private/var/db/MobileIdentityData 2>/dev/null || true
 chflags noschg,nouchg /private/var/protected/trustd/private/ocspcache.sqlite3 2>/dev/null || true

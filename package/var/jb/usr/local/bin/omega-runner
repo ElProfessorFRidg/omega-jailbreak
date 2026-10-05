@@ -1,16 +1,30 @@
 #!/var/jb/usr/bin/sh
 # Root runner fired by launchd (WatchPaths on /var/mobile/.omega/trigger).
-# Reads the requested subcommand, runs the worker AS ROOT, writes the output
-# where the (non-root) app can read it. This is how the native app performs
-# privileged actions without itself being root.
+# Reads the requested command, runs the matching worker AS ROOT, and writes
+# the output where the (non-root) app can read it. This is how the native app
+# performs privileged actions without itself being root.
 export PATH=/var/jb/usr/bin:/var/jb/bin:/var/jb/usr/sbin:/var/jb/sbin:/usr/bin:/bin:/usr/sbin:/sbin
 D=/var/mobile/.omega
-cmd=$(cat "$D/cmd" 2>/dev/null)
-case "$cmd" in
-    apply|status|diag) ;;
-    *) cmd=status ;;
+BIN=/var/jb/usr/local/bin
+
+# First word is the verb; the rest are arguments (e.g. "dns-install 9.9.9.9").
+line=$(cat "$D/cmd" 2>/dev/null)
+verb=$(printf '%s' "$line" | awk '{print $1}')
+rest=$(printf '%s' "$line" | cut -s -d' ' -f2- | tr -cd '0-9A-Za-z._: -')
+
+case "$verb" in
+    apply|status|diag|config-get)
+        out=$("$BIN/omega-ondevice" "$verb" 2>&1) ;;
+    dns-install)
+        out=$("$BIN/omega-dns" install $rest 2>&1) ;;
+    dns-remove)
+        out=$("$BIN/omega-dns" remove 2>&1) ;;
+    dns-status)
+        out=$("$BIN/omega-dns" status 2>&1) ;;
+    *)
+        out=$("$BIN/omega-ondevice" status 2>&1) ;;
 esac
-out=$(/var/jb/usr/local/bin/omega-ondevice "$cmd" 2>&1)
+
 printf '%s\n' "$out" > "$D/out.tmp" 2>/dev/null
 mv -f "$D/out.tmp" "$D/out" 2>/dev/null
 chmod 666 "$D/out" 2>/dev/null

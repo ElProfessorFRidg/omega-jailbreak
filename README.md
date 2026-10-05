@@ -29,17 +29,35 @@ Two independent layers — you need **both**:
 ## Repo layout
 
 ```
-package/      the .deb source (DEBIAN/ + var/jb/…): worker, web UI, LaunchDaemons
+package/      the tweak .deb source (DEBIAN/ + var/jb/…):
+              omega-ondevice  config-driven worker (modules: OCSP cache, ban-lists,
+                              valid.sqlite3, service restart) — re-applies at boot
+              omega-dns       on-device local DNS block (dnsmasq @ 127.0.0.1) + profile
+              omega-runner    root trigger runner the app talks to
+              LaunchDaemons   boot + hourly worker, and the WatchPaths trigger
+app/          native Theos app: tabbed UI (Dashboard / Modules / DNS / Settings / Log)
 repo-assets/  Sileo repo landing page (served by GitHub Pages)
 pc-tools/     PC-side helpers (USB, no server needed):
               omega_ssh.py          drive the device over SSH-through-USB (diag/clean/exec)
               omega_pro.py          inspect profiles + OCSP revocation status (restore is inspection-grade)
               offline_hotspot.ps1   Windows "dead" Wi-Fi hotspot (no internet) for offline restores
-              Omega-DoH.mobileconfig iOS DoH profile template (point it at your DNS)
+              Omega-DoH.mobileconfig iOS DoH profile template (point it at your VPS DNS)
 docs/         SELF-HOSTED-DNS.md    set up your own filtering DNS on a VPS
-build.sh      build the .deb (needs dpkg-deb; CI does it for you)
-.github/      CI: builds the .deb and publishes a Sileo repo via GitHub Pages
+build.sh      build the tweak .deb (needs dpkg-deb; CI does it for you)
+.github/      CI: builds the .deb(s) and publishes a Sileo repo via GitHub Pages
 ```
+
+### Native app (tabs)
+
+- **Dashboard** — one-tap Apply, colour-coded protection status, enabled-module summary.
+- **Modules** — toggle each technique independently (OCSP cache purge+lock, empty
+  ban-lists+lock, `valid.sqlite3` blanking, service restart). Stored in
+  `/var/mobile/.omega/config`, read by the root worker on every run and at boot.
+- **DNS** — install a **local** resolver (`dnsmasq` on `127.0.0.1:53`) that blocks the
+  four Apple revocation domains and forwards the rest to your chosen upstream, then
+  install the generated profile so iOS routes through it. No VPS required. (Needs the
+  `dnsmasq` package.)
+- **Settings** — apply-on-launch, diagnostics. **Log** — the live worker log.
 
 ## Install (on device)
 
